@@ -2,15 +2,13 @@
 """
 keheai-bench — 给 OpenAI 兼容 API 网关测延迟和吞吐的命令行小工具。
 
-为什么写它：选 API 网关最怕两件事——慢、贵、还动不动挂。
-这个小工具 30 秒帮你测出：首次响应延迟（TTFT）、每秒能出多少字（tok/s）、
-一次请求花多少钱。支持任意 OpenAI 兼容端点，包括 keheai.com。
+为什么写它：选 API 网关最怕两件事——慢、动不动挂。
+这个小工具 30 秒帮你测出真实可量的两项：首次响应延迟（TTFT）、每秒出多少字（tok/s）。
+支持任意 OpenAI 兼容端点（硅基流动、DeepSeek 官方、你自建的 New-API，或 keheai.com）。
 
 用法：
     pip install openai
-    python bench.py --base-url https://keheai.com/v1 --api-key YOUR_KEY --model deepseek-chat
-    # 对比两家：
-    python bench.py --base-url https://keheai.com/v1 --api-key KEY --model deepseek-chat --rounds 3
+    python bench.py --base-url https://你的网关/v1 --api-key YOUR_KEY --model deepseek-chat --rounds 3
 """
 import argparse
 import sys
@@ -25,11 +23,12 @@ except ImportError:
 def bench(base_url: str, api_key: str, model: str, prompt: str, rounds: int = 1):
     client = OpenAI(base_url=base_url, api_key=api_key)
     print(f"\n=== {base_url}  model={model}  rounds={rounds} ===")
-    ttfts, tpss, costs = [], [], []
+    ttfts, tpss = [], []
     for i in range(rounds):
         t0 = time.time()
         first = True
         text = ""
+        ttft = None
         try:
             stream = client.chat.completions.create(
                 model=model,
@@ -48,16 +47,18 @@ def bench(base_url: str, api_key: str, model: str, prompt: str, rounds: int = 1)
         except Exception as e:
             print(f"  round {i+1}: 调用失败 -> {e}")
             continue
-        n_tokens = max(len(text) // 2, 1)  # 粗略：1 token≈2 字符（中文更密）
+        if ttft is None:
+            print(f"  round {i+1}: 无返回内容")
+            continue
+        # 粗略 token 估算：1 token ≈ 2 个英文字符（中文更密），仅用于吞吐量级参考
+        n_tokens = max(len(text) // 2, 1)
         tps = n_tokens / elapsed
-        cost = (n_tokens / 1_000_000) * 0.001  # 占位单价，真实价格看网关文档
         ttfts.append(ttft)
         tpss.append(tps)
-        costs.append(cost)
-        print(f"  round {i+1}: TTFT={ttft:.2f}s  ~{tps:.0f} tok/s  约 {len(text)} 字  ~${cost:.5f}")
+        print(f"  round {i+1}: TTFT={ttft:.2f}s  ~{tps:.0f} tok/s  约 {len(text)} 字")
     if ttfts:
-        print(f"  均值: TTFT={sum(ttfts)/len(ttfts):.2f}s  tok/s={sum(tpss)/len(tpss):.0f}  "
-              f"~${sum(costs)/len(costs):.5f}/次")
+        print(f"  均值: TTFT={sum(ttfts)/len(ttfts):.2f}s  tok/s={sum(tpss)/len(tpss):.0f}")
+        print("  （价格为各网关自己的定价，本工具不估成本，避免误导）")
 
 
 def main():
